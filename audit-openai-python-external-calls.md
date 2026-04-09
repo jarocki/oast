@@ -79,10 +79,26 @@ Can be overridden via the `websocket_base_url` client parameter.
 
 **Result: NO references found.** A code search for `huggingface`, `hugging_face`, and `hf_hub` across the entire repository returned zero matches. The openai-python library has **no HuggingFace integration or dependency**.
 
-### 1.7 Other Third-Party Services
+### 1.7 Weights & Biases (wandb) - Server-Side Fine-Tuning Integration
+
+**Result: 8 files with references** - This is an API-level integration for fine-tuning job monitoring.
+
+Key files:
+| File | Role |
+|------|------|
+| `src/openai/types/fine_tuning/fine_tuning_job_wandb_integration.py` | Defines `FineTuningJobWandbIntegration` model (`project`, `entity`, `name`, `tags`) |
+| `src/openai/types/fine_tuning/fine_tuning_job_wandb_integration_object.py` | Wraps integration with `type: Literal["wandb"]` discriminator |
+| `src/openai/types/fine_tuning/fine_tuning_job_integration.py` | Type alias: `FineTuningJobIntegration = FineTuningJobWandbIntegrationObject` |
+| `src/openai/types/fine_tuning/fine_tuning_job.py` | `Optional[List[FineTuningJobWandbIntegrationObject]]` on `FineTuningJob` |
+| `src/openai/types/fine_tuning/job_create_params.py` | `IntegrationWandb` TypedDict for creating jobs with W&B |
+
+**Important distinction:** This is a **server-side** integration. The `wandb` Python package is NOT imported as a dependency. The client sends W&B configuration parameters to the OpenAI API, and OpenAI's servers handle the actual W&B reporting during fine-tuning. However, it does mean that fine-tuning jobs can be configured to send training metrics to Weights & Biases servers (`api.wandb.ai`), which is a third-party service.
+
+**Risk for local-only usage:** Low if not using OpenAI fine-tuning. For complete isolation, remove the wandb integration types from `src/openai/types/fine_tuning/`.
+
+### 1.8 Other Third-Party Analytics Services
 
 **Result: NO references found.** Code searches confirmed zero matches for:
-- Weights & Biases (`wandb`)
 - Sentry
 - Datadog
 - OpenTelemetry
@@ -291,7 +307,8 @@ If using the Realtime API locally, ensure `websocket_base_url` is explicitly set
 | Category | Finding |
 |----------|---------|
 | **HuggingFace calls** | None found |
-| **Third-party analytics** | None found (no Sentry, Datadog, OpenTelemetry, W&B, etc.) |
+| **Weights & Biases (wandb)** | Server-side integration in fine-tuning API types (8 files); no client-side `wandb` import |
+| **Third-party analytics** | None found (no Sentry, Datadog, OpenTelemetry, Segment, Mixpanel, Amplitude) |
 | **Background telemetry** | None - no phone-home, no background threads |
 | **External binary download** | Yes - GritQL from GitHub (CLI migrate tool only) |
 | **Environment fingerprinting** | Yes - 8 `X-Stainless-*` headers sent with every API request |
@@ -306,4 +323,5 @@ If using the Realtime API locally, ensure `websocket_base_url` is explicitly set
 2. **MEDIUM:** Every request includes OS, architecture, Python version, and SDK version headers that fingerprint the client environment
 3. **MEDIUM:** Workload Identity module has hardcoded URLs to `auth.openai.com`, Azure IMDS (`169.254.169.254`), and GCP metadata server - contacted only when Workload Identity is explicitly configured
 4. **LOW:** CLI migration tool downloads/executes a third-party binary from GitHub
-5. **NONE:** No hidden telemetry, no HuggingFace calls, no third-party analytics SDKs
+5. **LOW:** Weights & Biases integration types in fine-tuning API (server-side only, no client-side wandb import)
+6. **NONE:** No HuggingFace calls, no third-party analytics SDKs (Sentry, Datadog, OpenTelemetry, etc.)
