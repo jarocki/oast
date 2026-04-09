@@ -46,7 +46,24 @@ The `openai migrate` CLI command downloads a third-party binary (GritQL) from Gi
 
 **Risk:** Downloads and executes an unsigned binary from an external repository at runtime.
 
-### 1.4 WebSocket Connections (Realtime API)
+### 1.4 Workload Identity Authentication (Cloud Metadata Services)
+
+**File:** `src/openai/auth/_workload.py`
+
+This module contacts **three external services** for OAuth/identity federation when Workload Identity authentication is configured:
+
+| Hardcoded URL | Service | When Contacted |
+|---------------|---------|---------------|
+| `https://auth.openai.com/oauth/token` | OpenAI OAuth token exchange | When using Workload Identity auth (default token exchange URL, overridable via constructor) |
+| `http://169.254.169.254/metadata/identity/oauth2/token` | Azure Instance Metadata Service (IMDS) | When running on Azure with managed identity |
+| `http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity` | GCP Metadata Server | When running on GCP with service account |
+
+Additionally reads Kubernetes service account tokens from:
+- `/var/run/secrets/kubernetes.io/serviceaccount/token` (standard k8s path, hardcoded)
+
+**Risk:** These endpoints are only contacted when Workload Identity is explicitly configured, but the URLs are hardcoded and could leak identity tokens to cloud metadata services. For air-gapped or local-only deployments, this module should be disabled or removed.
+
+### 1.5 WebSocket Connections (Realtime API)
 
 **File:** `src/openai/resources/realtime/realtime.py`
 **Endpoint:** Derived from the base URL with scheme conversion (`https` -> `wss`) + `/realtime` path.
@@ -58,11 +75,11 @@ base_url = self.___client._base_url.copy_with(scheme=ws_scheme)
 
 Can be overridden via the `websocket_base_url` client parameter.
 
-### 1.5 HuggingFace
+### 1.6 HuggingFace
 
 **Result: NO references found.** A code search for `huggingface`, `hugging_face`, and `hf_hub` across the entire repository returned zero matches. The openai-python library has **no HuggingFace integration or dependency**.
 
-### 1.6 Other Third-Party Services
+### 1.7 Other Third-Party Services
 
 **Result: NO references found.** Code searches confirmed zero matches for:
 - Weights & Biases (`wandb`)
@@ -229,7 +246,17 @@ Either:
 - Replace the GritQL download with a local-only alternative
 - Add a flag to skip the download and require a pre-installed grit binary
 
-### 5.4 Remove Azure Integration (If Not Needed)
+### 5.4 Remove or Disable Workload Identity Authentication
+
+**File:** `src/openai/auth/_workload.py`
+
+This module contacts external cloud metadata services and OpenAI's OAuth server. For local-only usage:
+- Remove or stub out the `_workload.py` module
+- Ensure `workload_identity` parameter is never passed to the client constructor
+- This prevents any calls to `auth.openai.com`, Azure IMDS (`169.254.169.254`), or GCP metadata (`metadata.google.internal`)
+- Also prevents reading Kubernetes service account tokens from `/var/run/secrets/kubernetes.io/serviceaccount/token`
+
+### 5.5 Remove Azure Integration (If Not Needed)
 
 **File:** `src/openai/lib/azure.py`
 
@@ -237,7 +264,7 @@ If running purely local models, remove or disable:
 - `AzureOpenAI` / `AsyncAzureOpenAI` classes
 - Azure environment variable reads (`AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_AD_TOKEN`, `AZURE_OPENAI_API_KEY`)
 
-### 5.5 Guard the Default Base URL
+### 5.6 Guard the Default Base URL
 
 To prevent accidental calls to `api.openai.com`, modify `src/openai/_client.py`:
 
@@ -253,7 +280,7 @@ if base_url is None:
     )
 ```
 
-### 5.6 Disable WebSocket Realtime Connections to OpenAI
+### 5.7 Disable WebSocket Realtime Connections to OpenAI
 
 If using the Realtime API locally, ensure `websocket_base_url` is explicitly set to a local endpoint. Otherwise, the client derives the WebSocket URL from the base URL (which would hit `wss://api.openai.com` by default).
 
@@ -269,6 +296,7 @@ If using the Realtime API locally, ensure `websocket_base_url` is explicitly set
 | **External binary download** | Yes - GritQL from GitHub (CLI migrate tool only) |
 | **Environment fingerprinting** | Yes - 8 `X-Stainless-*` headers sent with every API request |
 | **Hardcoded OpenAI URL** | Yes - `https://api.openai.com/v1` as default base URL |
+| **Workload Identity auth** | Contacts `auth.openai.com`, Azure IMDS, GCP metadata (only when explicitly configured) |
 | **Azure endpoints** | Configurable, not hardcoded (user provides endpoint) |
 | **Override mechanism** | Available via `base_url` parameter or `OPENAI_BASE_URL` env var |
 
@@ -276,5 +304,6 @@ If using the Realtime API locally, ensure `websocket_base_url` is explicitly set
 
 1. **HIGH:** Default base URL sends all requests to `api.openai.com` if not overridden
 2. **MEDIUM:** Every request includes OS, architecture, Python version, and SDK version headers that fingerprint the client environment
-3. **LOW:** CLI migration tool downloads/executes a third-party binary from GitHub
-4. **NONE:** No hidden telemetry, no HuggingFace calls, no third-party analytics SDKs
+3. **MEDIUM:** Workload Identity module has hardcoded URLs to `auth.openai.com`, Azure IMDS (`169.254.169.254`), and GCP metadata server - contacted only when Workload Identity is explicitly configured
+4. **LOW:** CLI migration tool downloads/executes a third-party binary from GitHub
+5. **NONE:** No hidden telemetry, no HuggingFace calls, no third-party analytics SDKs
