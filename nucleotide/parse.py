@@ -33,11 +33,20 @@ def parse_template(path: Path) -> dict | None:
 
 
 def _path_from_raw(raw: str) -> str | None:
-    """Pull the request-target out of the first line of a raw HTTP request."""
+    """Pull the request-target out of the first line of a raw HTTP request.
+
+    Only accepts targets that look like a real request-target: an origin-form
+    path (`/...`), an absolute-form URL, or `*` (OPTIONS *). This filters out
+    templates with malformed request lines whose `parts[1]` would otherwise
+    be misread as a path (e.g., a literal `HTTP/1.1`).
+    """
     first = raw.lstrip().splitlines()[0] if raw.strip() else ""
     parts = first.split()
-    if len(parts) >= 2 and parts[0].isupper():
-        return parts[1]
+    if len(parts) < 2 or not parts[0].isupper():
+        return None
+    target = parts[1]
+    if target == "*" or target.startswith(("/", "http://", "https://")):
+        return target
     return None
 
 

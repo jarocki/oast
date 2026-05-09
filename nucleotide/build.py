@@ -17,7 +17,12 @@ from .parse import (
 from .snippets import compute_unique_snippets
 
 
-def build_lookup(templates_dir: Path, *, source_url: str | None = None) -> dict[str, Any]:
+def build_lookup(
+    templates_dir: Path,
+    *,
+    source_url: str | None = None,
+    min_snippet_len: int = 4,
+) -> dict[str, Any]:
     templates_dir = Path(templates_dir)
     templates: dict[str, dict[str, Any]] = {}
     corpus: dict[str, list[str]] = {}
@@ -41,12 +46,13 @@ def build_lookup(templates_dir: Path, *, source_url: str | None = None) -> dict[
             "tags": _split_tags(info.get("tags")),
             "file": rel,
             "paths": paths,
+            "chunks": sorted({c for c in chunks if len(c) >= min_snippet_len}),
             "fingerprints": extract_fingerprints(doc),
         }
         corpus[tid] = chunks
 
     http_corpus = {tid: chunks for tid, chunks in corpus.items() if chunks}
-    snippets, unresolved = compute_unique_snippets(http_corpus)
+    snippets, unresolved = compute_unique_snippets(http_corpus, min_len=min_snippet_len)
     for tid in templates:
         templates[tid]["url_snippet"] = snippets.get(tid)
 
@@ -63,6 +69,7 @@ def build_lookup(templates_dir: Path, *, source_url: str | None = None) -> dict[
             "resolved_snippets": len(snippets),
             "unresolved_count": len(unresolved),
             "no_url_template_count": no_url_count,
+            "min_snippet_len": min_snippet_len,
         },
         "templates": templates,
         "snippet_index": snippet_index,

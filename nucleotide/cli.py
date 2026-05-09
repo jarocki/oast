@@ -18,7 +18,7 @@ def _build(args: argparse.Namespace) -> int:
     else:
         tdir = fetch(args.repo, args.cache_dir, update=not args.no_fetch)
         source = args.repo
-    result = build_lookup(tdir, source_url=source)
+    result = build_lookup(tdir, source_url=source, min_snippet_len=args.min_len)
     args.out.write_text(json.dumps(result, indent=2, sort_keys=True))
     md = result["metadata"]
     print(
@@ -31,21 +31,44 @@ def _build(args: argparse.Namespace) -> int:
 
 def _lookup(args: argparse.Namespace) -> int:
     data = json.loads(args.lookup_file.read_text())
-    index = data.get("snippet_index", {})
-    items = sorted(index.items(), key=lambda kv: -len(kv[0]))
+    snippet_index: dict[str, str] = data.get("snippet_index", {})
+    snippet_items = sorted(snippet_index.items(), key=lambda kv: -len(kv[0]))
+    templates: dict[str, dict] = data.get("templates", {})
+
+    chunk_targets: list[tuple[str, str]] = []
+    if not args.strict:
+        seen_pairs: set[tuple[str, str]] = set()
+        for tid, meta in templates.items():
+            if meta.get("url_snippet"):
+                continue
+            for c in meta.get("chunks") or ():
+                if len(c) >= args.min_chunk and (c, tid) not in seen_pairs:
+                    chunk_targets.append((c, tid))
+                    seen_pairs.add((c, tid))
+        chunk_targets.sort(key=lambda kv: -len(kv[0]))
+
     queries = args.query
     if not queries and not sys.stdin.isatty():
         queries = [line.rstrip("\n") for line in sys.stdin if line.strip()]
+
     for q in queries:
-        hits = [(snip, tid) for snip, tid in items if snip in q]
-        if not hits:
+        printed_any = False
+        for snip, tid in snippet_items:
+            if snip in q:
+                meta = templates.get(tid, {})
+                print(
+                    f"{q}\tUNIQUE\t{tid}\t{snip}\t{meta.get('severity','')}\t{meta.get('name','')}"
+                )
+                printed_any = True
+        for chunk, tid in chunk_targets:
+            if chunk in q:
+                meta = templates.get(tid, {})
+                print(
+                    f"{q}\tAMBIGUOUS\t{tid}\t{chunk}\t{meta.get('severity','')}\t{meta.get('name','')}"
+                )
+                printed_any = True
+        if not printed_any:
             print(f"{q}\tNO_MATCH")
-            continue
-        for snip, tid in hits:
-            meta = data["templates"].get(tid, {})
-            sev = meta.get("severity", "")
-            name = meta.get("name", "")
-            print(f"{q}\t{tid}\t{snip}\t{sev}\t{name}")
     return 0
 
 
@@ -72,6 +95,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     bld.add_argument("--out", type=Path, default=Path("nucleotide-lookup.json"))
     bld.add_argument(
+        "--min-len",
+        type=int,
+        default=4,
+        help="Minimum snippet length. Increase (e.g. 6 or 8) for higher precision against arbitrary log traffic.",
+    )
+    bld.add_argument(
         "--no-fetch",
         action="store_true",
         help="Reuse the cache directory without pulling updates.",
@@ -83,6 +112,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     look.add_argument("lookup_file", type=Path)
     look.add_argument("query", nargs="*")
+    look.add_argument(
+        "--strict",
+        action="store_true",
+        help="Only report 1:1 unique-snippet matches; suppress shared-path (AMBIGUOUS) hits.",
+    )
+    look.add_argument(
+        "--min-chunk",
+        type=int,
+        default=8,
+        help="Minimum length for shared-path chunks considered in AMBIGUOUS lookup (default 8).",
+    )
     look.set_defaults(func=_lookup)
 
     args = p.parse_args(argv)
