@@ -1,0 +1,61 @@
+name: Seed jarocki/nucleotide
+
+# One-shot helper to seed (or re-seed) jarocki/nucleotide from a branch in this repo.
+# Trigger manually from the Actions tab. Requires the NUCLEOTIDE_PUSH_TOKEN secret:
+# a fine-grained PAT with `Contents: Read and write` on jarocki/nucleotide.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: Branch in jarocki/oast to seed nucleotide from
+        required: true
+        default: claude/nuclei-template-lookup-weMj1
+      destination_branch:
+        description: Target branch on jarocki/nucleotide
+        required: true
+        default: main
+      force:
+        description: Force-push (use only when intentionally overwriting nucleotide)
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify PAT is set
+        env:
+          PAT: ${{ secrets.NUCLEOTIDE_PUSH_TOKEN }}
+        run: |
+          if [ -z "$PAT" ]; then
+            echo "::error::Secret NUCLEOTIDE_PUSH_TOKEN is not set."
+            echo "Create a fine-grained PAT with Contents: Read and write on jarocki/nucleotide,"
+            echo "then add it as a repo secret at:"
+            echo "  https://github.com/jarocki/oast/settings/secrets/actions/new"
+            exit 1
+          fi
+
+      - name: Checkout source branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_branch }}
+          fetch-depth: 0
+
+      - name: Push to jarocki/nucleotide
+        env:
+          PAT: ${{ secrets.NUCLEOTIDE_PUSH_TOKEN }}
+          DEST: ${{ inputs.destination_branch }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -e
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name  "github-actions[bot]"
+          git remote add nucleotide "https://x-access-token:${PAT}@github.com/jarocki/nucleotide.git"
+          if [ "$FORCE" = "true" ]; then
+            git push --force nucleotide "HEAD:${DEST}"
+          else
+            git push nucleotide "HEAD:${DEST}"
+          fi
+          echo "::notice::Pushed $(git rev-parse --short HEAD) to jarocki/nucleotide@${DEST}"
